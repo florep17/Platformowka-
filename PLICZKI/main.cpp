@@ -1,6 +1,69 @@
 #include "raylib.h"
 #include <string>
 #include <cmath> // Do fizyki rzutu
+#include <cstdio> // Do TextFormat/sprintf
+
+// --- NOWOŚĆ: SYSTEM LEVELOWANIA ---
+struct LevelSystem {
+    int level = 8;              // Startowy poziom
+    float currentXP = 0.0f;     // Obecne XP
+    float requiredXP = 20.0f;   // XP potrzebne na pierwszy awans
+    const float multiplier = 1.5f; // Mnożnik (1.5x trudniej co poziom)
+
+    // Funkcja dodająca XP (wywołaj ją, gdy trafisz)
+    void GainXP(float amount) {
+        currentXP += amount;
+        
+        // Sprawdzamy czy awans (pętla while na wypadek dużej ilości XP na raz)
+        while (currentXP >= requiredXP) {
+            currentXP -= requiredXP;      // Odejmij zużyte punkty
+            level++;
+            //nie uzywanie multiplier juz ale algorytm do poziomow zeby było trudniej na wyszych poziomach 
+            if(level<=10){
+                requiredXP = requiredXP * 1.5; 
+            }
+            else{
+                requiredXP = requiredXP * 2.5; // Poziom 11+ wymaga 2.5 XP
+            }                    
+                 
+        }
+    }
+
+    // Funkcja rysująca interfejs (UI)
+    void DrawHUD() {
+        int screenW = GetScreenWidth();
+        
+        // Wymiary paska
+        float barW = 220.0f;
+        float barH = 30.0f;
+        float margin = 20.0f;
+
+        // Pozycja: Prawy Górny Róg
+        float x = screenW - barW - margin;
+        float y = margin;
+
+        // 1. Tło paska (półprzezroczyste czarne)
+        DrawRectangle(x, y, barW, barH, Fade(BLACK, 0.6f));
+
+        // 2. Wypełnienie (zależy od postępu)
+        float progress = currentXP / requiredXP;
+        // Zabezpieczenie, żeby pasek nie wyszedł poza ramkę przy animacji
+        if (progress > 1.0f) progress = 1.0f; 
+        
+        DrawRectangle(x, y, barW * progress, barH, ORANGE);
+
+        // 3. Ramka
+        DrawRectangleLines(x, y, barW, barH, WHITE);
+
+        // 4. Teksty
+        DrawText(TextFormat("POZIOM %d", level), x, y - 20, 20, BLACK); // Nad paskiem
+        
+        // Tekst na środku paska (np. "10 / 20 XP")
+        const char* xpText = TextFormat("%d / %d XP", (int)currentXP, (int)requiredXP);
+        int textWidth = MeasureText(xpText, 10);
+        DrawText(xpText, x + (barW/2) - (textWidth/2), y + 10, 10, WHITE);
+    }
+};
 
 // --- ENUMY ---
 enum GameScreen {
@@ -50,6 +113,9 @@ bool isPaused = false;
 
 // Inicjalizacja minigry
 FlankiGame flanki = { AIMING, 0.0f, true, {0,0}, {0,0}, false, 0 };
+
+// NOWOŚĆ: Inicjalizacja systemu levelowania
+LevelSystem stats;
 
 // --- FUNKCJE POMOCNICZE ---
 
@@ -120,6 +186,13 @@ void UpdateGame(float dt) {
             if (CheckCollisionCircleRec(ballCenter, 10, canRect)) {
                 flanki.playerWon = true;
                 flanki.score++;
+                
+                //  DODAWANIE EXP ---
+                // Dodajemy XP tylko jeśli trafiliśmy
+                // tu jest ustawione na 10.0f, ale możesz zmienić według uznania(Np w innych minigrach jakby co)
+                stats.GainXP(10.0f); 
+                // -----------------------------
+
                 flanki.state = RESULT;
             }
 
@@ -245,6 +318,10 @@ void DrawGame() {
                 DrawText("Spacja aby rzucic ponownie", 280, 250, 20, DARKGRAY);
             }
         }
+        
+        // --- NOWOŚĆ: RYSOWANIE PASKA LEVELOWANIA ---
+        stats.DrawHUD();
+        // -------------------------------------------
 
     } 
     else {
@@ -273,6 +350,11 @@ void DrawGame() {
 
         // Rysuj gracza
         DrawRectangle((int)player.position.x, (int)player.position.y, 40, 40, player.color);
+        
+        // --- NOWOŚĆ: RYSOWANIE PASKA LEVELOWANIA RÓWNIEŻ W ŚWIECIE GRY ---
+        // (Jeśli chcesz, żeby pasek było widać też jak chodzisz, zostaw to. 
+        //  Jeśli ma być tylko we flankach, usuń poniższą linijkę)
+        stats.DrawHUD();
         
         // Pauza
         if (isPaused) {
