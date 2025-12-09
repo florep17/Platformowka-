@@ -90,6 +90,7 @@ struct Player {
     float speed;
     int level;
     Color color;
+    float hunger;
 };
 
 struct FlankiGame {
@@ -106,7 +107,7 @@ struct FlankiGame {
 const int screenWidth = 800;
 const int screenHeight = 600;
 
-Player player = { { 400, 300 }, 200.0f, 1, BLUE };
+Player player = { { 400, 300 }, 200.0f, 1, BLUE, 100.0f };
 Location currentLocation = POKOJ;
 GameScreen currentScreen = GAMEPLAY;
 bool isPaused = false;
@@ -213,10 +214,22 @@ void UpdateGame(float dt) {
     // --- LOGIKA NORMALNA (CHODZENIE) ---
     
     // Ruch
-    if (IsKeyDown(KEY_W)) player.position.y -= player.speed * dt;
-    if (IsKeyDown(KEY_S)) player.position.y += player.speed * dt;
-    if (IsKeyDown(KEY_A)) player.position.x -= player.speed * dt;
-    if (IsKeyDown(KEY_D)) player.position.x += player.speed * dt;
+    if (IsKeyDown(KEY_W)){ 
+        player.position.y -= player.speed * dt;
+        player.hunger -= 0.5f * dt; // Zmniejszanie głodu przy ruchu
+    }
+    if (IsKeyDown(KEY_S)){
+         player.position.y += player.speed * dt;
+         player.hunger -= 0.5f * dt;
+    }
+    if (IsKeyDown(KEY_A)){ 
+        player.position.x -= player.speed * dt;
+        player.hunger -= 0.5f * dt;
+    }
+    if (IsKeyDown(KEY_D)) {
+        player.position.x += player.speed * dt;
+        player.hunger -= 0.5f * dt;
+    }
 
     // Granice ekranu
     if (player.position.x < 0) player.position.x = 0;
@@ -241,6 +254,14 @@ void UpdateGame(float dt) {
         
         // Strefa Flanek (Kamień)
         Rectangle flankiZone = { 200, 400, 40, 40 }; // Kamień w parku
+
+        Rectangle kebabRect = { 100, 100, 60, 40 }; // Kebap w parku
+        if (CheckCollisionRecs(playerRect, kebabRect)){
+            if(IsKeyPressed(KEY_E)){
+                player.hunger += 20.0f; // Zwiększanie głodu
+            if (player.hunger > 100.0f) player.hunger = 100.0f; // Maksymalny głód 100
+        }
+    }
 
         if (CheckCollisionRecs(playerRect, doorToRoom)) {
             currentLocation = POKOJ;
@@ -341,6 +362,9 @@ void DrawGame() {
             // Obiekt Flanki (Kamień)
             DrawRectangle(200, 400, 40, 40, GRAY);
             DrawText("Flanki", 195, 380, 10, WHITE);
+            //Obiekt Kebap
+            DrawRectangle(100, 100, 60, 40, YELLOW);
+            DrawText("Kebap", 110, 110, 10, BLACK);
         }
         else if (currentLocation == KAMPUS) {
             ClearBackground(LIGHTGRAY);
@@ -355,7 +379,29 @@ void DrawGame() {
         // (Jeśli chcesz, żeby pasek było widać też jak chodzisz, zostaw to. 
         //  Jeśli ma być tylko we flankach, usuń poniższą linijkę)
         stats.DrawHUD();
-        
+        // 1. Ustalanie koloru w zależności od głodu
+        Color hungerColor = GREEN;
+        if (player.hunger < 50.0f) hungerColor = ORANGE;
+        if (player.hunger < 20.0f) hungerColor = RED;
+
+        // 2. Wymiary i pozycja (pod paskiem poziomu)
+        float barWidth = 220.0f;
+        float barHeight = 30.0f;
+        float x = GetScreenWidth() - barWidth - 20; // Ta sama pozycja X co poziom
+        float y = 60.0f; // Nieco niżej niż pasek poziomu
+
+        // 3. Rysowanie tła (szare)
+        DrawRectangle(x, y, barWidth, barHeight, Fade(BLACK, 0.6f));
+
+        // 4. Rysowanie paska głodu (zmieniający się kolor)
+        float hungerPercent = player.hunger / 100.0f; // Obliczamy procent (0.0 do 1.0)
+        DrawRectangle(x, y, barWidth * hungerPercent, barHeight, hungerColor);
+
+        // 5. Ramka i napis
+        DrawRectangleLines(x, y, barWidth, barHeight, WHITE);
+        DrawText("GLOD", x + 10, y + 8, 10, WHITE);
+        DrawText(TextFormat("%d%%", (int)player.hunger), x + barWidth - 40, y + 8, 10, WHITE);
+
         // Pauza
         if (isPaused) {
             DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.5f));
