@@ -2,7 +2,7 @@
 #include <string>
 #include <cmath> // Do fizyki rzutu
 #include <cstdio> // Do TextFormat/sprintf
-
+using namespace std;
 // --- NOWOŚĆ: SYSTEM LEVELOWANIA ---
 struct LevelSystem {
     int level = 8;              // Startowy poziom
@@ -69,7 +69,8 @@ struct LevelSystem {
 enum GameScreen {
     MENU,
     GAMEPLAY,
-    MINIGAME_FLANKI
+    MINIGAME_FLANKI,
+    MINIGAME_EGZAMIN
 };
 
 enum Location {
@@ -83,6 +84,12 @@ enum FlankiState {
     THROWING, // Lot kamienia
     RESULT // Wynik (Trafiles/Pudlo)
 };
+enum PhoneState {
+    PHONE_CLOSED, // Telefon w kieszeni
+    MENU1,         // Wybór aplikacji
+    PIN,          // Ekran logowania
+    ACCOUNT       // Saldo konta
+};
 
 // --- STRUKTURY ---
 struct Player {
@@ -91,6 +98,7 @@ struct Player {
     int level;
     Color color;
     float hunger;
+    float money;
 };
 
 struct FlankiGame {
@@ -103,11 +111,21 @@ struct FlankiGame {
     int score;
 };
 
+struct Phone {
+    PhoneState state;  // Co telefon robi teraz
+    string correctPin;    // Prawidłowe hasło 
+    int selectedIcon;  // Wybrana ikona w menu
+    string inputPin; // Wprowadzany PIN
+    bool showError; // Czy pokazać błąd przy PIN-ie
+};
+
+// Tworzymy telefon: { Stan_Początkowy, PIN }
+Phone phone = { PHONE_CLOSED, "0000", 0, "", false };
 // --- ZMIENNE GLOBALNE ---
 const int screenWidth = 800;
 const int screenHeight = 600;
 
-Player player = { { 400, 300 }, 200.0f, 1, BLUE, 100.0f };
+Player player = { { 400, 300 }, 200.0f, 1, BLUE, 100.0f, 20.0f};
 Location currentLocation = POKOJ;
 GameScreen currentScreen = GAMEPLAY;
 bool isPaused = false;
@@ -145,7 +163,63 @@ void UpdateGame(float dt) {
     // PAUZA
     if (IsKeyPressed(KEY_TAB)) isPaused = !isPaused;
     if (isPaused) return;
+    // Telefon
+    if(IsKeyPressed(KEY_UP)){
+        if(phone.state == PHONE_CLOSED){
+            phone.state = MENU1;
+        }
+    }
+    if(IsKeyPressed(KEY_BACKSPACE)){
+        if(phone.state == MENU1 || phone.state == PIN || phone.state == ACCOUNT){
+            phone.state = PHONE_CLOSED;
+        }
+    }
+    if(phone.state == MENU1 || phone.state == PIN || phone.state == ACCOUNT){
+        if(IsKeyPressed(KEY_Q)){
+            if(phone.state == ACCOUNT) phone.state = MENU1; 
+        }
+        
+    }
+    if(phone.state == MENU1 && IsKeyPressed(KEY_ENTER) && phone.selectedIcon == 0){
+        phone.state = PIN; // Przejście do ekranu PIN
+    }
+    else if(phone.state == PIN){
+        // 1. Obsługa wpisywania tekstu (cyfr)
+        int key = GetCharPressed();
 
+        while (key > 0) {
+            // Sprawdzamy kod ASCII: od 48 ('0') do 57 ('9')
+            // ORAZ czy wpisaliśmy mniej niż 4 znaki
+            if ((key >= 48) && (key <= 57) && (phone.inputPin.length() < 4)) {
+                phone.inputPin += (char)key; // Dodajemy znak do naszego stringa
+            }
+            key = GetCharPressed(); // Pobierz kolejny znak (dla szybkiego pisania)
+        }
+
+        // 2. Obsługa kasowania (Backspace)
+        if (IsKeyPressed(KEY_BACKSPACE)) {
+            if (phone.inputPin.length() > 0) {
+                // Usuwa ostatni znak z napisu
+                phone.inputPin.pop_back(); 
+            }
+        }
+
+        // 3. Zatwierdzanie PIN-u ENTEREM
+        if (IsKeyPressed(KEY_ENTER)) {
+             // Tutaj zaraz dopiszemy sprawdzanie hasła!
+             if(phone.inputPin == phone.correctPin){
+                phone.state = ACCOUNT; // Poprawny PIN, przejście do konta
+                phone.inputPin = ""; // Czyszczenie wprowadzanego PIN-u
+                phone.showError = false; // Nie pokazujemy błędu
+            } else {
+                phone.showError = true; // Błędny PIN, pokazujemy błąd
+                phone.inputPin = ""; // Czyszczenie wprowadzanego PIN-u
+            }
+             
+        }
+       }
+
+    
     // --- LOGIKA MINIGRY FLANKI ---
     if (currentScreen == MINIGAME_FLANKI) {
         if (IsKeyPressed(KEY_Q)) {
@@ -210,7 +284,15 @@ void UpdateGame(float dt) {
         }
         return; // Jeśli jesteśmy w minigrze, nie robimy ruchu postacią poniżej
     }
-
+        // Logika dla ekranu Egzaminu
+    if (currentScreen == MINIGAME_EGZAMIN) {
+        // Jeśli gracz wciśnie klawisz "4" (poprawna odpowiedź)
+        if (IsKeyPressed(KEY_FOUR)) {
+            player.money += 50;        // 1. Dodaj 50 zł stypendium
+            currentScreen = GAMEPLAY;  // 2. Wróć do chodzenia
+              
+        } return; //zatrzymuje ruch gracza podczas egzaminu
+    }
     // --- LOGIKA NORMALNA (CHODZENIE) ---
     
     // Ruch
@@ -258,8 +340,14 @@ void UpdateGame(float dt) {
         Rectangle kebabRect = { 100, 100, 60, 40 }; // Kebap w parku
         if (CheckCollisionRecs(playerRect, kebabRect)){
             if(IsKeyPressed(KEY_E)){
-                player.hunger += 20.0f; // Zwiększanie głodu
-            if (player.hunger > 100.0f) player.hunger = 100.0f; // Maksymalny głód 100
+            if(player.money >= 15.0f){
+                player.money -= 15.0f;
+                player.hunger += 30.0f; // Zwiększa głód o 30
+                if (player.hunger > 100.0f) player.hunger = 100.0f; // Maksymalny głód 100
+            } else if (player.money < 15.0f){
+                DrawText("NIE STAĆ CIĘ BIEDAKU!", 100, 110, 10, RED);
+            }
+            
         }
     }
 
@@ -270,6 +358,8 @@ void UpdateGame(float dt) {
         else if (CheckCollisionRecs(playerRect, doorToCampus)) {
             currentLocation = KAMPUS;
             SetSpawnPoint(1); // Wchodzimy od lewej strony kampusu
+
+            
         }
         
         // Wejście do minigry
@@ -290,6 +380,12 @@ void UpdateGame(float dt) {
             currentLocation = PARK;
             SetSpawnPoint(2); // Wchodzimy od prawej strony parku
         }
+        // Stolik egzaminacyjny
+        Rectangle examRect = {350, 300, 100, 60}; // Stolik egzaminacyjny
+            if (CheckCollisionRecs(playerRect, examRect) && IsKeyPressed(KEY_E)) {
+                currentScreen = MINIGAME_EGZAMIN;
+                
+            }
     }
 }
 
@@ -297,6 +393,44 @@ void UpdateGame(float dt) {
 void DrawGame() {
     BeginDrawing();
     ClearBackground(BLACK);
+    if (phone.state == MENU1) {
+        // 1. Obudowa telefonu (Prawy dolny róg)
+        DrawRectangle(560, 180, 220, 400, DARKGRAY);
+        DrawRectangleLines(560, 180, 220, 400, BLACK); // Opcjonalna czarna ramka obudowy
+
+        // 2. Ikona Banku niebieski kwadrat)
+        DrawRectangle(590, 210, 50, 50, BLUE);
+        DrawText("BANK", 595, 225, 10, WHITE);
+
+        // 3. Podświetlenie (Jeśli wybrana jest ikona nr 0)
+        if (phone.selectedIcon == 0) {
+            // Czerwona ramka DOKŁADNIE w tym samym miejscu co ikona
+            DrawRectangleLines(590, 210, 50, 50, RED);
+        }
+    } else if(phone.state == PIN){
+        // Ekran PIN
+        DrawRectangle(560, 180, 220, 400, LIGHTGRAY);
+        DrawRectangleLines(560, 180, 220, 400, BLACK); // Ramka ekranu
+
+        DrawText("WPROWADZ PIN:", 580, 200, 15, BLACK);
+        // Rysujemy wprowadzony PIN (gwiazdki dla bezpieczeństwa)
+        DrawText(phone.inputPin.c_str(), 600, 250, 20, BLACK);
+        // warunek do wyswietlania bledu
+        if(phone.showError == true){
+            DrawText("BLEDNY PIN!", 580, 300, 15, RED);
+        }
+    } else if(phone.state == ACCOUNT){
+        // 1. Tło (może białe dla banku?)
+    DrawRectangle(560, 180, 220, 400, RAYWHITE);
+    DrawRectangleLines(560, 180, 220, 400, BLACK);
+
+    DrawText("SALDO KONTA:", 580, 220, 10, DARKGRAY);
+    // Wyświetlanie pieniędzy gracza
+    DrawText(TextFormat("%.2f zl", player.money), 590, 240, 20, GREEN);
+
+        // Instrukcja powrotu (żeby gracz wiedział co kliknąć)
+        DrawText("[Q] Wroc", 630, 550, 10, LIGHTGRAY);
+    }
 
     if (currentScreen == MINIGAME_FLANKI) {
         ClearBackground(SKYBLUE);
@@ -344,7 +478,10 @@ void DrawGame() {
         stats.DrawHUD();
         // -------------------------------------------
 
-    } 
+    } else if(currentScreen == MINIGAME_EGZAMIN){
+        ClearBackground(LIGHTGRAY);
+        DrawText("EGZAMIN: Ile to jest 2 + 2?", 100, 100, 20, BLACK);
+    }
     else {
         // --- RYSOWANIE ŚWIATA ---
         if (currentLocation == POKOJ) {
@@ -370,6 +507,10 @@ void DrawGame() {
             ClearBackground(LIGHTGRAY);
             DrawText("KAMPUS", 20, 20, 20, DARKBLUE);
             DrawRectangle(0, screenHeight/2 - 50, 20, 100, DARKGREEN); // Do parku
+
+            // Stolik egzaminacyjny
+            DrawRectangle(350, 300, 100, 60, PURPLE);
+            DrawText("EGZAMIN", 365, 320, 10, WHITE);
         }
 
         // Rysuj gracza
