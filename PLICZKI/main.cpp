@@ -65,7 +65,7 @@ struct LevelSystem {
 enum GameScreen { MENU, GAMEPLAY, MINIGAME_FLANKI, MINIGAME_EGZAMIN };
 enum Location { POKOJ, PARK, KAMPUS };
 enum FlankiState { AIMING, THROWING, RESULT };
-enum PhoneState { PHONE_CLOSED, MENU1, PIN, ACCOUNT };
+enum PhoneState { PHONE_CLOSED, MENU1, PIN, ACCOUNT, APP_CRYPTO };
 
 // --- STRUKTURY ---
 struct Player {
@@ -93,10 +93,13 @@ struct Phone {
     string correctPin;    
     int selectedIcon;  
     string inputPin; 
-    bool showError; 
+    bool showError;
+    int currentBet;       // Ile chcemy postawić, bazowo 10zł
+    string gambleInfo;    // Tekst z wynikiem (np. "Wygrałeś 50 zł!")
+    Color infoColor;      // Kolor tekstu (zielony/czerwony)
 };
 
-Phone phone = { PHONE_CLOSED, "0000", 0, "", false };
+Phone phone = { PHONE_CLOSED, "0000", 0, "", false, 10, "", WHITE };
 
 // --- ZMIENNE GLOBALNE ---
 const int screenWidth = 800;
@@ -146,16 +149,93 @@ void UpdateGame(float dt) {
         if(phone.state == PHONE_CLOSED) phone.state = MENU1;
     }
     if(IsKeyPressed(KEY_BACKSPACE)){
-        if(phone.state == MENU1 || phone.state == PIN || phone.state == ACCOUNT) phone.state = PHONE_CLOSED;
+        if(phone.state == MENU1 || phone.state == PIN || phone.state == ACCOUNT || phone.state == APP_CRYPTO){
+            phone.state = PHONE_CLOSED;
+            phone.gambleInfo = ""; // Reset wiadomości przy wyjściu
+            }
     }
-    if(phone.state == MENU1 || phone.state == PIN || phone.state == ACCOUNT){
+    if(phone.state == MENU1 || phone.state == PIN || phone.state == ACCOUNT || phone.state == APP_CRYPTO){
         if(IsKeyPressed(KEY_Q)){
-            if(phone.state == ACCOUNT) phone.state = MENU1; 
+            if(phone.state == ACCOUNT){ 
+            phone.state = MENU1;
+            phone.gambleInfo = ""; // Reset wiadomości przy wyjściu
+            } 
         }
     }
     if(phone.state == MENU1 && IsKeyPressed(KEY_ENTER) && phone.selectedIcon == 0){
         phone.state = PIN;
     }
+    else if(phone.state == PIN){
+        int key = GetCharPressed();
+        while (key > 0) {
+            if ((key >= 48) && (key <= 57) && (phone.inputPin.length() < 4)) {
+                phone.inputPin += (char)key;
+            }
+            key = GetCharPressed();
+        }
+        if (IsKeyPressed(KEY_BACKSPACE)) {
+            if (phone.inputPin.length() > 0) phone.inputPin.pop_back(); 
+        }
+        if (IsKeyPressed(KEY_ENTER)) {
+             if(phone.inputPin == phone.correctPin){
+                phone.state = ACCOUNT;
+                phone.inputPin = "";
+                phone.showError = false;
+            } else {
+                phone.showError = true;
+                phone.inputPin = "";
+            }
+        }
+    }
+// --- LOGIKA MENU TELEFONU ---
+    if (phone.state == MENU1) {
+        // Zmiana ikony lewo/prawo (0 = Bank, 1 = Krypto)
+        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_LEFT)) {
+            phone.selectedIcon = (phone.selectedIcon == 0) ? 1 : 0;
+        }
+
+        if (IsKeyPressed(KEY_ENTER)) {
+            if (phone.selectedIcon == 0) {
+                phone.state = PIN; // Ikona Banku
+            } 
+            else if (phone.selectedIcon == 1) {
+                phone.state = APP_CRYPTO; // Ikona Krypto
+                phone.currentBet = 10; // Reset stawki na start
+            }
+        }
+    }
+// --- LOGIKA APLIKACJI KANTOR CRYPTO ---
+    else if (phone.state == APP_CRYPTO) {
+        // Zmiana stawki
+        if (IsKeyPressed(KEY_UP)) phone.currentBet += 10;
+        if (IsKeyPressed(KEY_DOWN)) phone.currentBet -= 10;
+        
+        // Zabezpieczenia (nie można postawić mniej niż 10 ani więcej niż się ma)
+        if (phone.currentBet < 10) phone.currentBet = 10;
+        if (phone.currentBet > player.money) phone.currentBet = (int)player.money;
+
+        // Zatwierdzenie zakładu (ENTER)
+        if (IsKeyPressed(KEY_ENTER) && player.money >= phone.currentBet && phone.currentBet > 0) {
+            int chance = GetRandomValue(0, 100); // Losowanie 0-100
+            
+            if (chance >= 50) { 
+                // WYGRANA
+                player.money += phone.currentBet;
+                phone.gambleInfo = "Zysk: +" + to_string(phone.currentBet) + " zl!";
+                phone.infoColor = GREEN;
+                stats.GainXP(5.0f); // Nagroda XP
+            } else {
+                // PRZEGRANA
+                player.money -= phone.currentBet;
+                phone.gambleInfo = "Strata: -" + to_string(phone.currentBet) + " zl...";
+                phone.infoColor = RED;
+            }
+            
+            // Korekta stawki po przegranej (jeśli mamy mniej pieniędzy niż wynosiła stawka)
+            if (phone.currentBet > player.money) phone.currentBet = (int)player.money;
+        }
+    }
+    // --- LOGIKA PINU (zostaje tak jak była, ale upewnij się, że jest w bloku else if) ---
     else if(phone.state == PIN){
         int key = GetCharPressed();
         while (key > 0) {
@@ -337,8 +417,12 @@ void DrawGame() {
         DrawRectangle(590, 210, 50, 50, BLUE);
         DrawText("BANK", 595, 225, 10, WHITE);
         if (phone.selectedIcon == 0) DrawRectangleLines(590, 210, 50, 50, RED);
+        // IKONA 2: KRYPTO (Nowość!)
+        DrawRectangle(680, 210, 50, 50, PURPLE);
+        DrawText("KRYPTO", 685, 225, 10, WHITE);
+        if (phone.selectedIcon == 1) DrawRectangleLines(680, 210, 50, 50, RED);
     } else if(phone.state == PIN){
-        DrawRectangle(560, 180, 220, 400, LIGHTGRAY);
+        DrawRectangle(560, 180, 220, 400, DARKGRAY);
         DrawRectangleLines(560, 180, 220, 400, BLACK);
         DrawText("WPROWADZ PIN:", 580, 200, 15, BLACK);
         DrawText(phone.inputPin.c_str(), 600, 250, 20, BLACK);
@@ -349,6 +433,30 @@ void DrawGame() {
         DrawText("SALDO KONTA:", 580, 220, 10, DARKGRAY);
         DrawText(TextFormat("%.2f zl", player.money), 590, 240, 20, GREEN);
         DrawText("[Q] Wroc", 630, 550, 10, LIGHTGRAY);
+    } else if(phone.state == APP_CRYPTO){
+        // Ekran aplikacji Krypto
+        DrawRectangle(560, 180, 220, 400, BLACK);
+        DrawRectangleLines(560, 180, 220, 400, WHITE);
+        
+        DrawText("SZYBKIE KRYPTO", 590, 200, 20, PURPLE);
+        
+        // Stan konta
+        DrawText("Twoje konto:", 580, 240, 15, WHITE);
+        DrawText(TextFormat("%.2f zl", player.money), 580, 260, 20, GREEN);
+        
+        // Wybór stawki
+        DrawText("STAWKA (Gora/Dol):", 580, 300, 10, LIGHTGRAY);
+        DrawRectangle(580, 315, 180, 40, DARKGRAY);
+        DrawText(TextFormat("%d zl", phone.currentBet), 630, 325, 20, WHITE);
+        
+        // Przycisk
+        DrawRectangle(580, 370, 180, 40, GOLD);
+        DrawText("INWESTUJ [ENTER]", 595, 382, 15, BLACK);
+        
+        // Wynik
+        DrawText(phone.gambleInfo.c_str(), 580, 430, 15, phone.infoColor);
+
+        DrawText("[Q] Wroc", 640, 550, 10, GRAY);
     }
 
     if (currentScreen == MINIGAME_FLANKI) {
