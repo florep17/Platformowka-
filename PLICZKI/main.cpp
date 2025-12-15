@@ -6,7 +6,8 @@
 
 using namespace std;
 
-// --- STRUKTURA PYTAŃ DO EGZAMINU ---
+// --- DANE GRY ---
+
 struct Question {
     string text;       
     string answerA;    
@@ -14,68 +15,108 @@ struct Question {
     int correctKey;    
 };
 
+// Pytania podzielone na poziomy trudności
 Question examQuestions[] = {
+    // POZIOM 1 (ŁATWE)
     {"Ile to jest 2 + 2?", "3", "4", KEY_TWO},
     {"Stolica Polski to?", "Warszawa", "Krakow", KEY_ONE},
-    {"Rok bitwy pod Grunwaldem?", "1410", "1920", KEY_ONE},
     {"Najlepszy przyjaciel studenta?", "Sesja", "Piwo", KEY_TWO},
-    {"Wzor na pole kwadratu?", "a * a", "2 * a", KEY_ONE}
+    
+    // POZIOM 2 (ŚREDNIE)
+    {"Rok bitwy pod Grunwaldem?", "1410", "1920", KEY_ONE},
+    {"Pierwiastek z 16 to?", "4", "8", KEY_ONE},
+    {"Autor 'Pana Tadeusza'?", "Slowacki", "Mickiewicz", KEY_TWO},
+
+    // POZIOM 3 (TRUDNE)
+    {"Calka z e^x to?", "e^x", "x*e^x", KEY_ONE},
+    {"Jezyk tego programu to?", "Python", "C++", KEY_TWO},
+    {"Kiedy sesja poprawkowa?", "We wrzesniu", "Nigdy", KEY_ONE}
 };
+
 int currentQuestionIndex = 0; 
+int activeExamTier = 0; 
+
+// --- NPC ---
+struct NPC {
+    string name;
+    string dialogue;
+    int mapLocation; // rzutowane na enum Location
+    Vector2 position;
+    Color color;
+};
+
+NPC npcs[] = {
+    {"Dziekan", "Dzien dobry. Widze Pana na poprawce we wrzesniu...", 2, {200, 400}, RED}, // KAMPUS
+    {"Ziomek", "Ej mordo, pozycz 2 zlote na piwo, oddam jutro!", 1, {500, 150}, PURPLE},   // PARK
+    {"Starosta", "Wplaciles juz na ksero? Bo zamykam liste.", 1, {300, 300}, BLUE}         // PARK
+};
+int activeNPCIndex = -1;
 
 // --- SYSTEM LEVELOWANIA ---
 struct LevelSystem {
-    int level = 8;              
+    int level = 1;              
     float currentXP = 0.0f;     
-    float requiredXP = 20.0f;   
+    float requiredXP = 50.0f;   
 
     void GainXP(float amount) {
         currentXP += amount;
         while (currentXP >= requiredXP) {
             currentXP -= requiredXP;
             level++;
-            if(level<=10) requiredXP *= 1.5; 
-            else requiredXP *= 2.5; 
+            requiredXP *= 1.5; 
         }
     }
 
     void DrawHUD() {
         int screenW = GetScreenWidth();
         float barW = 220.0f;
-        float barH = 30.0f;
+        float barH = 20.0f;
         float margin = 20.0f;
         float x = screenW - barW - margin;
-        float y = margin;
+        
+        // Przesuwamy niżej, żeby nie zasłaniało paska życia/głodu
+        float y = margin + 80; 
 
         DrawRectangle(x, y, barW, barH, Fade(BLACK, 0.6f));
         float progress = currentXP / requiredXP;
-        if (progress > 1.0f) progress = 1.0f; 
+        if (progress > 1.0f) {
+            progress = 1.0f; 
+        }
         
-        DrawRectangle(x, y, barW * progress, barH, ORANGE);
+        DrawRectangle(x, y, barW * progress, barH, PURPLE);
         DrawRectangleLines(x, y, barW, barH, WHITE);
-        DrawText(TextFormat("POZIOM %d", level), x, y - 20, 20, BLACK);
         
-        const char* xpText = TextFormat("%d / %d XP", (int)currentXP, (int)requiredXP);
-        int textWidth = MeasureText(xpText, 10);
-        DrawText(xpText, x + (barW/2) - (textWidth/2), y + 10, 10, WHITE);
+        const char* lvlText = TextFormat("LVL %d", level);
+        DrawText(lvlText, x - 60, y + 2, 20, WHITE);
     }
 };
 
 // --- ENUMY ---
-enum GameScreen { MENU, GAMEPLAY, MINIGAME_FLANKI, MINIGAME_EGZAMIN };
+enum GameScreen { MENU, GAMEPLAY, MINIGAME_FLANKI, MINIGAME_EGZAMIN, KEBAB_MENU, SHOP_MENU, EXAM_MENU, DIALOGUE_MODE };
 enum Location { POKOJ, PARK, KAMPUS };
 enum FlankiState { AIMING, THROWING, RESULT };
-enum PhoneState { PHONE_CLOSED, MENU1, PIN, ACCOUNT, APP_CRYPTO };
+enum PhoneState { PHONE_CLOSED, MENU1, PIN, ACCOUNT, APP_CRYPTO, APP_LOANS };
 
 // --- STRUKTURY ---
 struct Player {
     Vector2 position;
-    float speed;
+    float baseSpeed;
+    float currentSpeed;
     int level;
     Color color;
+    
+    // Statystyki
+    float health;
     float hunger;
-    float money;
-    float hitboxSize; // Rozmiar fizyczny (niewidzialny kwadrat kolizji)
+    // Energia usunięta
+    
+    float money; // Może być ujemne
+    float debt;
+    float hitboxSize; 
+    
+    // Buffy
+    float speedBoostTimer;
+    bool hasCheatSheet;
 };
 
 struct FlankiGame {
@@ -94,26 +135,39 @@ struct Phone {
     int selectedIcon;  
     string inputPin; 
     bool showError;
-    int currentBet;       // Ile chcemy postawić, bazowo 10zł
-    string gambleInfo;    // Tekst z wynikiem (np. "Wygrałeś 50 zł!")
-    Color infoColor;      // Kolor tekstu (zielony/czerwony)
+    int currentBet;       
+    string gambleInfo;    
+    Color infoColor;
+    
+    // Chwilówki
+    int loanOption; 
+    string loanInfo;
 };
 
-Phone phone = { PHONE_CLOSED, "0000", 0, "", false, 10, "", WHITE };
+Phone phone = { PHONE_CLOSED, "0000", 0, "", false, 10, "", WHITE, 0, "" };
 
 // --- ZMIENNE GLOBALNE ---
 const int screenWidth = 800;
 const int screenHeight = 600;
 
-// Hitbox zostawiamy mały (40px), żeby nie blokował się w drzwiach
-Player player = { { 400, 300 }, 200.0f, 1, BLUE, 100.0f, 20.0f, 40.0f };
+// Gracz startuje z białym kolorem (brak efektów)
+Player player = { { 400, 300 }, 200.0f, 200.0f, 1, WHITE, 100.0f, 100.0f, 50.0f, 0.0f, 40.0f, 0.0f, false };
 
 Location currentLocation = POKOJ;
 GameScreen currentScreen = GAMEPLAY;
 bool isPaused = false;
 
+// Czas
+float gameTime = 8.0f; 
+int dayCount = 1;
+
 FlankiGame flanki = { AIMING, 0.0f, true, {0,0}, {0,0}, false, 0 };
 LevelSystem stats;
+
+// Pomocnicze
+int kebabOption = 1;
+string notification = ""; 
+float notificationTimer = 0.0f;
 
 // --- TEKSTURY ---
 Texture2D texturaPiwa;
@@ -122,6 +176,11 @@ Texture2D tloPokoj;
 Texture2D tloFlanki;
 
 // --- FUNKCJE POMOCNICZE ---
+
+void ShowNotification(string text) {
+    notification = text;
+    notificationTimer = 3.0f;
+}
 
 void ResetFlanki() {
     flanki.state = AIMING;
@@ -132,40 +191,128 @@ void ResetFlanki() {
 }
 
 void SetSpawnPoint(int fromSide) {
-    if (fromSide == 0) player.position = { (float)screenWidth/2, (float)screenHeight/2 };
+    if (fromSide == 0) {
+        player.position = { (float)screenWidth/2, (float)screenHeight/2 };
+    }
+    if (fromSide == 1) {
+        player.position = { 120, (float)screenHeight/2 }; 
+    }
+    if (fromSide == 2) {
+        player.position = { (float)screenWidth - 120, (float)screenHeight/2 }; 
+    }
+}
+
+void StartExam(int tier) {
+    activeExamTier = tier;
+    if (tier == 1) currentQuestionIndex = GetRandomValue(0, 2);
+    if (tier == 2) currentQuestionIndex = GetRandomValue(3, 5);
+    if (tier == 3) currentQuestionIndex = GetRandomValue(6, 8);
+    currentScreen = MINIGAME_EGZAMIN;
+}
+
+void WakeUpInRoom(bool hospital) {
+    currentLocation = POKOJ;
+    player.position = { 400, 350 };
+    gameTime = 8.0f;
+    dayCount++;
     
-    // Spawn pointy odsunięte od drzwi (120px), żeby nie wchodzić w pętlę
-    if (fromSide == 1) player.position = { 120, (float)screenHeight/2 }; 
-    if (fromSide == 2) player.position = { (float)screenWidth - 120, (float)screenHeight/2 }; 
+    if (hospital) {
+        player.health = 100.0f;
+        player.hunger = 50.0f;
+        player.money -= 200.0f; 
+        ShowNotification("SZPITAL! Rachunek: 200 zl.");
+    } else {
+        // Omdlenie z głodu
+        player.health = 50.0f;
+        player.hunger = 30.0f;
+        player.money -= 50.0f; 
+        ShowNotification("Zemdlałeś z głodu! -50 zl.");
+    }
+    // UWAGA: Nie resetujemy długu ani kasy do 0, można mieć debet!
 }
 
 // --- UPDATE (LOGIKA) ---
 void UpdateGame(float dt) {
     if (IsKeyPressed(KEY_TAB)) isPaused = !isPaused;
     if (isPaused) return;
+
+    if (notificationTimer > 0) notificationTimer -= dt;
+
+    // --- DIALOGI Z NPC ---
+    if (currentScreen == DIALOGUE_MODE) {
+        if (IsKeyPressed(KEY_E) || IsKeyPressed(KEY_SPACE) || IsKeyPressed(KEY_Q)) {
+            currentScreen = GAMEPLAY;
+            activeNPCIndex = -1;
+        }
+        return; 
+    }
+
+    // --- LOGIKA PRZETRWANIA I CZASU ---
+    if (currentScreen == GAMEPLAY) {
+        // Czas płynie
+        gameTime += dt * 0.5f;
+        if (gameTime >= 24.0f) { 
+            gameTime = 0.0f; 
+            dayCount++; 
+        }
+
+        // Głód spada
+        player.hunger -= 2.0f * dt;
+
+        // Konsekwencje głodu
+        if (player.hunger <= 0.0f) {
+            player.hunger = 0.0f;
+            player.health -= 5.0f * dt; // Obrażenia
+            
+            // Miganie na czerwono
+            if ((int)(gameTime * 10) % 2 == 0) {
+                player.color = RED;
+            } else {
+                player.color = WHITE;
+            }
+        } else {
+            // Jeśli mamy speed boosta, kolor pomarańczowy, jeśli nie - biały
+            if (player.speedBoostTimer <= 0) {
+                player.color = WHITE;
+            }
+        }
+
+        // Śmierć (Szpital)
+        if (player.health <= 0.0f) {
+            WakeUpInRoom(true); 
+        }
+    }
+
+    // --- BUFFY ---
+    if (player.speedBoostTimer > 0.0f) {
+        player.speedBoostTimer -= dt;
+        player.currentSpeed = player.baseSpeed * 1.8f; 
+        if (player.hunger > 0) player.color = ORANGE; 
+    } else {
+        player.currentSpeed = player.baseSpeed;
+    }
     
-    // Telefon
-    if(IsKeyPressed(KEY_UP)){
+    // --- TELEFON ---
+    if (currentScreen == GAMEPLAY && IsKeyPressed(KEY_UP)){
         if(phone.state == PHONE_CLOSED) phone.state = MENU1;
     }
     if(IsKeyPressed(KEY_BACKSPACE)){
-        if(phone.state == MENU1 || phone.state == PIN || phone.state == ACCOUNT || phone.state == APP_CRYPTO){
+        if(phone.state != PHONE_CLOSED){
             phone.state = PHONE_CLOSED;
-            phone.gambleInfo = ""; // Reset wiadomości przy wyjściu
-            }
-    }
-    if(phone.state == MENU1 || phone.state == PIN || phone.state == ACCOUNT || phone.state == APP_CRYPTO){
-        if(IsKeyPressed(KEY_Q)){
-            if(phone.state == ACCOUNT){ 
-            phone.state = MENU1;
-            phone.gambleInfo = ""; // Reset wiadomości przy wyjściu
-            } 
+            phone.gambleInfo = ""; 
+            phone.loanInfo = "";
         }
     }
-    if(phone.state == MENU1 && IsKeyPressed(KEY_ENTER) && phone.selectedIcon == 0){
-        phone.state = PIN;
+    if(phone.state != PHONE_CLOSED && IsKeyPressed(KEY_Q)){
+        if(phone.state != MENU1) { 
+            phone.state = MENU1; 
+            phone.gambleInfo = ""; 
+            phone.loanInfo = ""; 
+        }
     }
-    else if(phone.state == PIN){
+
+    // --- LOGIKA APLIKACJI W TELEFONIE ---
+    if(phone.state == PIN){
         int key = GetCharPressed();
         while (key > 0) {
             if ((key >= 48) && (key <= 57) && (phone.inputPin.length() < 4)) {
@@ -187,74 +334,83 @@ void UpdateGame(float dt) {
             }
         }
     }
-// --- LOGIKA MENU TELEFONU ---
-    if (phone.state == MENU1) {
-        // Zmiana ikony lewo/prawo (0 = Bank, 1 = Krypto)
-        if (IsKeyPressed(KEY_RIGHT) || IsKeyPressed(KEY_LEFT)) {
-            phone.selectedIcon = (phone.selectedIcon == 0) ? 1 : 0;
+    else if (phone.state == MENU1) {
+        if (IsKeyPressed(KEY_RIGHT)) { 
+            phone.selectedIcon++; 
+            if (phone.selectedIcon > 2) phone.selectedIcon = 0; 
+        }
+        if (IsKeyPressed(KEY_LEFT)) { 
+            phone.selectedIcon--; 
+            if (phone.selectedIcon < 0) phone.selectedIcon = 2; 
         }
 
         if (IsKeyPressed(KEY_ENTER)) {
-            if (phone.selectedIcon == 0) {
-                phone.state = PIN; // Ikona Banku
-            } 
-            else if (phone.selectedIcon == 1) {
-                phone.state = APP_CRYPTO; // Ikona Krypto
-                phone.currentBet = 10; // Reset stawki na start
+            if (phone.selectedIcon == 0) phone.state = PIN;
+            else if (phone.selectedIcon == 1) { 
+                phone.state = APP_CRYPTO; 
+                phone.currentBet = 10; 
+            }
+            else if (phone.selectedIcon == 2) { 
+                phone.state = APP_LOANS; 
+                phone.loanOption = 0; 
+                phone.loanInfo = ""; 
             }
         }
     }
-// --- LOGIKA APLIKACJI KANTOR CRYPTO ---
     else if (phone.state == APP_CRYPTO) {
-        // Zmiana stawki
         if (IsKeyPressed(KEY_UP)) phone.currentBet += 10;
         if (IsKeyPressed(KEY_DOWN)) phone.currentBet -= 10;
         
-        // Zabezpieczenia (nie można postawić mniej niż 10 ani więcej niż się ma)
         if (phone.currentBet < 10) phone.currentBet = 10;
-        if (phone.currentBet > player.money) phone.currentBet = (int)player.money;
+        
+        // Hazard możliwy tylko z dodatnim saldem (opcjonalnie)
+        if (phone.currentBet > player.money && player.money > 0) phone.currentBet = (int)player.money;
+        else if (player.money <= 0) phone.currentBet = 0;
 
-        // Zatwierdzenie zakładu (ENTER)
         if (IsKeyPressed(KEY_ENTER) && player.money >= phone.currentBet && phone.currentBet > 0) {
-            int chance = GetRandomValue(0, 100); // Losowanie 0-100
-            
+            int chance = GetRandomValue(0, 100); 
             if (chance >= 50) { 
-                // WYGRANA
                 player.money += phone.currentBet;
-                phone.gambleInfo = "Zysk: +" + to_string(phone.currentBet) + " zl!";
+                phone.gambleInfo = "Wygrana!";
                 phone.infoColor = GREEN;
-                stats.GainXP(5.0f); // Nagroda XP
+                stats.GainXP(5.0f); 
             } else {
-                // PRZEGRANA
                 player.money -= phone.currentBet;
-                phone.gambleInfo = "Strata: -" + to_string(phone.currentBet) + " zl...";
+                phone.gambleInfo = "Przegrana...";
                 phone.infoColor = RED;
             }
-            
-            // Korekta stawki po przegranej (jeśli mamy mniej pieniędzy niż wynosiła stawka)
-            if (phone.currentBet > player.money) phone.currentBet = (int)player.money;
         }
     }
-    // --- LOGIKA PINU (zostaje tak jak była, ale upewnij się, że jest w bloku else if) ---
-    else if(phone.state == PIN){
-        int key = GetCharPressed();
-        while (key > 0) {
-            if ((key >= 48) && (key <= 57) && (phone.inputPin.length() < 4)) {
-                phone.inputPin += (char)key;
-            }
-            key = GetCharPressed();
-        }
-        if (IsKeyPressed(KEY_BACKSPACE)) {
-            if (phone.inputPin.length() > 0) phone.inputPin.pop_back(); 
-        }
+    else if (phone.state == APP_LOANS) {
+        if (IsKeyPressed(KEY_DOWN)) phone.loanOption++;
+        if (IsKeyPressed(KEY_UP)) phone.loanOption--;
+        if (phone.loanOption > 3) phone.loanOption = 0;
+        if (phone.loanOption < 0) phone.loanOption = 3;
+
         if (IsKeyPressed(KEY_ENTER)) {
-             if(phone.inputPin == phone.correctPin){
-                phone.state = ACCOUNT;
-                phone.inputPin = "";
-                phone.showError = false;
-            } else {
-                phone.showError = true;
-                phone.inputPin = "";
+            if (phone.loanOption == 0) { 
+                player.money += 100.0f; player.debt += 120.0f; phone.loanInfo = "Wzieles 100 zl!"; 
+            }
+            else if (phone.loanOption == 1) { 
+                player.money += 500.0f; player.debt += 700.0f; phone.loanInfo = "Wzieles 500 zl!"; 
+            }
+            else if (phone.loanOption == 2) { 
+                player.money += 1000.0f; player.debt += 1500.0f; phone.loanInfo = "Wzieles 1000 zl!"; 
+            }
+            else if (phone.loanOption == 3) {
+                if (player.debt > 0 && player.money > 0) {
+                    if (player.money >= player.debt) { 
+                        player.money -= player.debt; 
+                        player.debt = 0; 
+                        phone.loanInfo = "Splacono!"; 
+                    } else { 
+                        player.debt -= player.money; 
+                        player.money = 0; 
+                        phone.loanInfo = "Splaciles czesc."; 
+                    }
+                } else {
+                    phone.loanInfo = "Brak kasy/dlugu.";
+                }
             }
         }
     }
@@ -305,44 +461,94 @@ void UpdateGame(float dt) {
     
     // --- MINIGRA EGZAMIN ---
     if (currentScreen == MINIGAME_EGZAMIN) {
+        if (player.hasCheatSheet && IsKeyPressed(KEY_SPACE)) {
+            float reward = (activeExamTier == 1) ? 50.0f : (activeExamTier == 2 ? 150.0f : 500.0f);
+            player.money += reward; 
+            stats.GainXP(activeExamTier * 20.0f); 
+            player.hasCheatSheet = false; 
+            currentScreen = GAMEPLAY; 
+            return;
+        }
+
         if (IsKeyPressed(examQuestions[currentQuestionIndex].correctKey)) {
-            player.money += 50;        
+            float reward = (activeExamTier == 1) ? 50.0f : (activeExamTier == 2 ? 150.0f : 500.0f);
+            player.money += reward;        
+            stats.GainXP(activeExamTier * 20.0f);
             currentScreen = GAMEPLAY;  
+        } 
+        else if (GetKeyPressed() != 0) {
+            currentScreen = GAMEPLAY;
         }
         return; 
     }
 
-    // --- RUCH GRACZA ---
-    if (IsKeyDown(KEY_W)){ 
-        player.position.y -= player.speed * dt;
-        player.hunger -= 0.5f * dt;
-    }
-    if (IsKeyDown(KEY_S)){
-         player.position.y += player.speed * dt;
-         player.hunger -= 0.5f * dt;
-    }
-    if (IsKeyDown(KEY_A)){ 
-        player.position.x -= player.speed * dt;
-        player.hunger -= 0.5f * dt;
-    }
-    if (IsKeyDown(KEY_D)) {
-        player.position.x += player.speed * dt;
-        player.hunger -= 0.5f * dt;
+    // --- MENU INTERAKCJE (KEBAB, SKLEP, EGZAMIN) ---
+    if (currentScreen == KEBAB_MENU) {
+        if (IsKeyPressed(KEY_Q)) currentScreen = GAMEPLAY; 
+        if (IsKeyPressed(KEY_DOWN)) kebabOption++; 
+        if (IsKeyPressed(KEY_UP)) kebabOption--;
+        if (kebabOption > 2) kebabOption = 0; 
+        if (kebabOption < 0) kebabOption = 2;
+
+        if (IsKeyPressed(KEY_ENTER)) {
+            if (kebabOption == 0 && player.money >= 8.0f) { 
+                player.money -= 8.0f; player.hunger += 20.0f; currentScreen = GAMEPLAY; 
+            }
+            else if (kebabOption == 1 && player.money >= 18.0f) { 
+                player.money -= 18.0f; player.hunger += 50.0f; currentScreen = GAMEPLAY; 
+            }
+            else if (kebabOption == 2 && player.money >= 30.0f) { 
+                player.money -= 30.0f; player.hunger = 100.0f; player.health += 30.0f; currentScreen = GAMEPLAY; 
+            }
+            if (player.hunger > 100.0f) player.hunger = 100.0f;
+            if (player.health > 100.0f) player.health = 100.0f;
+        }
+        return; 
     }
 
-    // --- GRANICE MAPY (POPRAWIONE) ---
-    
+    if (currentScreen == SHOP_MENU) {
+        if (IsKeyPressed(KEY_Q)) currentScreen = GAMEPLAY;
+        if (IsKeyPressed(KEY_ONE) && player.money >= 20.0f) { 
+            player.money -= 20.0f; player.speedBoostTimer = 20.0f; 
+        }
+        if (IsKeyPressed(KEY_TWO) && player.money >= 100.0f && !player.hasCheatSheet) { 
+            player.money -= 100.0f; player.hasCheatSheet = true; 
+        }
+        return;
+    }
+
+    if (currentScreen == EXAM_MENU) {
+        if (IsKeyPressed(KEY_Q)) currentScreen = GAMEPLAY;
+        if (IsKeyPressed(KEY_ONE)) StartExam(1);
+        if (IsKeyPressed(KEY_TWO) && stats.level >= 2) StartExam(2);
+        if (IsKeyPressed(KEY_THREE) && stats.level >= 4) StartExam(3);
+        return;
+    }
+
+    // --- RUCH GRACZA ---
+    if (phone.state == PHONE_CLOSED) {
+        if (IsKeyDown(KEY_W)){ 
+            player.position.y -= player.currentSpeed * dt;
+        }
+        if (IsKeyDown(KEY_S)){
+             player.position.y += player.currentSpeed * dt;
+        }
+        if (IsKeyDown(KEY_A)){ 
+            player.position.x -= player.currentSpeed * dt;
+        }
+        if (IsKeyDown(KEY_D)) {
+            player.position.x += player.currentSpeed * dt;
+        }
+    }
+
+    // --- GRANICE MAPY ---
     if (currentLocation == POKOJ) {
-        // POSZERZONE GRANICE - TERAZ MOŻNA DOJŚĆ DO DRZWI
         if (player.position.x < 50) player.position.x = 50;
         if (player.position.x > 710) player.position.x = 710;
         if (player.position.y < 340) player.position.y = 340;
-        
-        // Zmieniono z 530 na 560, żeby stopa gracza dotknęła drzwi (Y=580)
         if (player.position.y > 560) player.position.y = 560; 
     } 
     else {
-        // Granice dla Parku i Kampusu
         if (player.position.x < 0) player.position.x = 0;
         if (player.position.y < 0) player.position.y = 0;
         if (player.position.x > screenWidth - player.hitboxSize) player.position.x = screenWidth - player.hitboxSize;
@@ -351,8 +557,16 @@ void UpdateGame(float dt) {
 
     Rectangle playerRect = { player.position.x, player.position.y, player.hitboxSize, player.hitboxSize };
 
-    // --- ZMIANA LOKACJI ---
+    // --- ZMIANA LOKACJI I KOLIZJE ---
     if (currentLocation == POKOJ) {
+        // Łóżko (sen)
+        Rectangle bedRect = { 50, 350, 100, 150 };
+        if (CheckCollisionRecs(playerRect, bedRect) && IsKeyPressed(KEY_E)) {
+            player.health += 50.0f; if(player.health > 100) player.health = 100;
+            player.hunger -= 20.0f; gameTime = 8.0f; dayCount++; 
+            ShowNotification("Wyspales sie! Dzien ++");
+        }
+
         Rectangle doorToPark = { (float)screenWidth/2 - 50, (float)screenHeight - 20, 100, 20 };
         if (CheckCollisionRecs(playerRect, doorToPark)) {
             currentLocation = PARK;
@@ -367,11 +581,8 @@ void UpdateGame(float dt) {
 
         if (CheckCollisionRecs(playerRect, kebabRect)){
             if(IsKeyPressed(KEY_E)){
-                if(player.money >= 15.0f){
-                    player.money -= 15.0f;
-                    player.hunger += 30.0f;
-                    if (player.hunger > 100.0f) player.hunger = 100.0f;
-                }
+                currentScreen = KEBAB_MENU;
+                kebabOption = 1;
             }
         }
 
@@ -398,10 +609,26 @@ void UpdateGame(float dt) {
             SetSpawnPoint(2);
         }
         Rectangle examRect = {350, 300, 100, 60};
+        Rectangle shopRect = {600, 100, 60, 80}; 
         
         if (CheckCollisionRecs(playerRect, examRect) && IsKeyPressed(KEY_E)) {
-            currentScreen = MINIGAME_EGZAMIN;
-            currentQuestionIndex = GetRandomValue(0, 4);
+            currentScreen = EXAM_MENU;
+        }
+        if (CheckCollisionRecs(playerRect, shopRect) && IsKeyPressed(KEY_E)) {
+            currentScreen = SHOP_MENU;
+        }
+    }
+
+    // --- INTERAKCJE Z NPC ---
+    for (int i = 0; i < 3; i++) {
+        if (npcs[i].mapLocation == currentLocation) {
+            Rectangle npcRect = { npcs[i].position.x, npcs[i].position.y, 60, 80 }; 
+            if (CheckCollisionRecs(playerRect, npcRect)) {
+                if (IsKeyPressed(KEY_E)) {
+                    currentScreen = DIALOGUE_MODE;
+                    activeNPCIndex = i;
+                }
+            }
         }
     }
 }
@@ -411,54 +638,7 @@ void DrawGame() {
     BeginDrawing();
     ClearBackground(BLACK);
 
-    if (phone.state == MENU1) {
-        DrawRectangle(560, 180, 220, 400, DARKGRAY);
-        DrawRectangleLines(560, 180, 220, 400, BLACK);
-        DrawRectangle(590, 210, 50, 50, BLUE);
-        DrawText("BANK", 595, 225, 10, WHITE);
-        if (phone.selectedIcon == 0) DrawRectangleLines(590, 210, 50, 50, RED);
-        // IKONA 2: KRYPTO (Nowość!)
-        DrawRectangle(680, 210, 50, 50, PURPLE);
-        DrawText("KRYPTO", 685, 225, 10, WHITE);
-        if (phone.selectedIcon == 1) DrawRectangleLines(680, 210, 50, 50, RED);
-    } else if(phone.state == PIN){
-        DrawRectangle(560, 180, 220, 400, DARKGRAY);
-        DrawRectangleLines(560, 180, 220, 400, BLACK);
-        DrawText("WPROWADZ PIN:", 580, 200, 15, BLACK);
-        DrawText(phone.inputPin.c_str(), 600, 250, 20, BLACK);
-        if(phone.showError) DrawText("BLEDNY PIN!", 580, 300, 15, RED);
-    } else if(phone.state == ACCOUNT){
-        DrawRectangle(560, 180, 220, 400, RAYWHITE);
-        DrawRectangleLines(560, 180, 220, 400, BLACK);
-        DrawText("SALDO KONTA:", 580, 220, 10, DARKGRAY);
-        DrawText(TextFormat("%.2f zl", player.money), 590, 240, 20, GREEN);
-        DrawText("[Q] Wroc", 630, 550, 10, LIGHTGRAY);
-    } else if(phone.state == APP_CRYPTO){
-        // Ekran aplikacji Krypto
-        DrawRectangle(560, 180, 220, 400, BLACK);
-        DrawRectangleLines(560, 180, 220, 400, WHITE);
-        
-        DrawText("SZYBKIE KRYPTO", 590, 200, 20, PURPLE);
-        
-        // Stan konta
-        DrawText("Twoje konto:", 580, 240, 15, WHITE);
-        DrawText(TextFormat("%.2f zl", player.money), 580, 260, 20, GREEN);
-        
-        // Wybór stawki
-        DrawText("STAWKA (Gora/Dol):", 580, 300, 10, LIGHTGRAY);
-        DrawRectangle(580, 315, 180, 40, DARKGRAY);
-        DrawText(TextFormat("%d zl", phone.currentBet), 630, 325, 20, WHITE);
-        
-        // Przycisk
-        DrawRectangle(580, 370, 180, 40, GOLD);
-        DrawText("INWESTUJ [ENTER]", 595, 382, 15, BLACK);
-        
-        // Wynik
-        DrawText(phone.gambleInfo.c_str(), 580, 430, 15, phone.infoColor);
-
-        DrawText("[Q] Wroc", 640, 550, 10, GRAY);
-    }
-
+    // --- MINIGRY ---
     if (currentScreen == MINIGAME_FLANKI) {
         DrawTexturePro(tloFlanki, 
             {0,0,(float)tloFlanki.width, (float)tloFlanki.height}, 
@@ -481,6 +661,7 @@ void DrawGame() {
         DrawCircleV(flanki.ballPos, 10, DARKGRAY);
 
         if (flanki.state == AIMING) {
+            // [POPRAWKA] Tło dla paska
             DrawRectangle(50, 100, 30, 200, LIGHTGRAY);
             DrawRectangle(50, 150, 30, 50, GREEN); 
             int barHeight = (int)(flanki.power * 200);
@@ -506,6 +687,10 @@ void DrawGame() {
         DrawText(TextFormat("1. %s", examQuestions[currentQuestionIndex].answerA.c_str()), 100, 300, 25, DARKGRAY);
         DrawText(TextFormat("2. %s", examQuestions[currentQuestionIndex].answerB.c_str()), 100, 350, 25, DARKGRAY);
         DrawText("Wybierz 1 lub 2 na klawiaturze", 100, 500, 20, RED);
+        
+        if (player.hasCheatSheet) {
+            DrawText("SCIAGA DOSTEPNA [SPACJA]", 100, 550, 20, GOLD);
+        }
     }
     else {
         // --- RYSOWANIE ŚWIATA ---
@@ -515,10 +700,21 @@ void DrawGame() {
                 {0,0,(float)screenWidth, (float)screenHeight}, 
                 {0,0}, 0.0f, WHITE);
             DrawText("POKOJ STUDENTA", 20, 20, 20, DARKGRAY);
+            DrawRectangle(50, 350, 100, 150, Fade(BLUE, 0.3f)); 
+            DrawText("LOZKO [E]", 60, 400, 10, BLACK);
         }
         else if (currentLocation == PARK) {
             ClearBackground(DARKGREEN); 
             DrawText("PARK", 20, 20, 20, WHITE);
+            
+            // [POPRAWKA] Ciemność tylko w parku
+            if (gameTime >= 20.0f || gameTime < 6.0f) {
+                DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.5f)); 
+            }
+            else if (gameTime >= 18.0f) {
+                DrawRectangle(0, 0, screenWidth, screenHeight, Fade(ORANGE, 0.2f)); 
+            }
+
             DrawRectangle(screenWidth/2 - 50, 0, 100, 20, BROWN); 
             DrawRectangle(screenWidth - 20, screenHeight/2 - 50, 20, 100, GRAY); 
             DrawRectangle(200, 400, 40, 40, GRAY);
@@ -532,15 +728,16 @@ void DrawGame() {
             DrawRectangle(0, screenHeight/2 - 50, 20, 100, DARKGREEN); 
             DrawRectangle(350, 300, 100, 60, PURPLE);
             DrawText("EGZAMIN [E]", 365, 320, 10, WHITE);
+            DrawRectangle(600, 100, 60, 80, RED); 
+            DrawText("SKLEP [E]", 595, 80, 10, WHITE);
         }
 
-        // --- RYSOWANIE GRACZA (ZMIENNY ROZMIAR) ---
+        // --- RYSOWANIE GRACZA ---
         
         float drawSize = 120.0f; // Domyślny rozmiar (Park)
         
-        // W Pokoju i na Kampusie postać jest 2.5x większa
         if (currentLocation == POKOJ || currentLocation == KAMPUS) {
-            drawSize = 300.0f; // 120 * 2.5 = 300
+            drawSize = 300.0f; 
         }
 
         // Centrowanie rysunku względem stóp (hitboxa)
@@ -555,25 +752,161 @@ void DrawGame() {
             drawSize 
         };
         
-        DrawTexturePro(texturaGracza, zrodloStudent, celStudent, {0,0}, 0.0f, WHITE);
+        DrawTexturePro(texturaGracza, zrodloStudent, celStudent, {0,0}, 0.0f, player.color);
         
+        // --- NPC ---
+        for (int i = 0; i < 3; i++) {
+            if (npcs[i].mapLocation == currentLocation) {
+                // Rysujemy NPC jako prostokąt z kolorem (można podmienić na teksturę)
+                DrawTexturePro(texturaGracza, 
+                    {0,0,(float)texturaGracza.width,(float)texturaGracza.height}, 
+                    {npcs[i].position.x, npcs[i].position.y, 100, 100}, 
+                    {0,0}, 0.0f, npcs[i].color);
+                DrawText(npcs[i].name.c_str(), npcs[i].position.x, npcs[i].position.y - 20, 10, WHITE);
+            }
+        }
+
+        // --- HUD ---
         stats.DrawHUD();
+        DrawText(TextFormat("DZIEN %d | %02d:00", dayCount, (int)gameTime), screenWidth - 180, 20, 20, WHITE);
         
-        Color hungerColor = GREEN;
-        if (player.hunger < 50.0f) hungerColor = ORANGE;
-        if (player.hunger < 20.0f) hungerColor = RED;
-
         float barWidth = 220.0f;
-        float barHeight = 30.0f;
+        float barHeight = 20.0f;
         float x = GetScreenWidth() - barWidth - 20; 
-        float y = 60.0f; 
+        float y = 50.0f; 
 
+        // Pasek Życia
+        DrawRectangle(x, y, barWidth, barHeight, Fade(BLACK, 0.6f));
+        DrawRectangle(x, y, barWidth * (player.health / 100.0f), barHeight, RED);
+        DrawRectangleLines(x, y, barWidth, barHeight, WHITE);
+        DrawText("ZYCIE", x + 5, y + 2, 10, WHITE);
+
+        // Pasek Głodu
+        y += 25;
         DrawRectangle(x, y, barWidth, barHeight, Fade(BLACK, 0.6f));
         float hungerPercent = player.hunger / 100.0f; 
-        DrawRectangle(x, y, barWidth * hungerPercent, barHeight, hungerColor);
+        DrawRectangle(x, y, barWidth * hungerPercent, barHeight, (player.hunger < 20.0f) ? ORANGE : GREEN);
         DrawRectangleLines(x, y, barWidth, barHeight, WHITE);
-        DrawText("GLOD", x + 10, y + 8, 10, WHITE);
-        DrawText(TextFormat("%d%%", (int)player.hunger), x + barWidth - 40, y + 8, 10, WHITE);
+        DrawText("GLOD", x + 5, y + 2, 10, WHITE);
+
+        if (notificationTimer > 0) {
+            DrawText(notification.c_str(), screenWidth/2 - MeasureText(notification.c_str(), 30)/2, 100, 30, RED);
+        }
+
+        // --- OKNA DIALOGOWE I MENU ---
+        if (currentScreen == DIALOGUE_MODE && activeNPCIndex != -1) {
+            DrawRectangle(0, 400, screenWidth, 200, Fade(BLACK, 0.8f));
+            DrawRectangleLines(0, 400, screenWidth, 200, WHITE);
+            DrawText(npcs[activeNPCIndex].name.c_str(), 50, 420, 30, npcs[activeNPCIndex].color);
+            DrawText(npcs[activeNPCIndex].dialogue.c_str(), 50, 470, 20, WHITE);
+            DrawText("[E] Zakoncz", 600, 560, 15, GRAY);
+        }
+
+        if (currentScreen == KEBAB_MENU) {
+            DrawRectangle(0,0,screenWidth,screenHeight,Fade(BLACK,0.7f));
+            DrawRectangle(200,150,400,300,RAYWHITE); 
+            DrawRectangleLines(200,150,400,300,BLACK);
+            DrawText("U SZWAGRA",330,165,20,BLACK);
+            Color c1=(kebabOption==0)?RED:BLACK; 
+            Color c2=(kebabOption==1)?RED:BLACK; 
+            Color c3=(kebabOption==2)?RED:BLACK;
+            DrawText("1. Frytki (8zl, Glod+)",240,260,20,c1); 
+            DrawText("2. Rollo (18zl, Glod++)",240,300,20,c2); 
+            DrawText("3. Kubel XXL (30zl, Glod MAX, HP+)",240,340,20,c3);
+            DrawText(TextFormat("Kasa: %.2f",player.money),240,400,20,DARKGREEN);
+        }
+        if (currentScreen == SHOP_MENU) {
+            DrawRectangle(0,0,screenWidth,screenHeight,Fade(BLACK,0.7f)); 
+            DrawRectangle(100,100,600,400,DARKGRAY); 
+            DrawRectangleLines(100,100,600,400,WHITE);
+            DrawText("SKLEP",250,120,30,WHITE); 
+            DrawText("1. Energetyk (20zl)",150,200,20,GREEN); 
+            DrawText("2. Sciaga (100zl)",150,250,20,YELLOW);
+            DrawText(TextFormat("Kasa: %.2f",player.money),150,350,20,WHITE);
+        }
+        if (currentScreen == EXAM_MENU) {
+            DrawRectangle(0,0,screenWidth,screenHeight,Fade(BLACK,0.7f)); 
+            DrawRectangle(100,100,600,400,RAYWHITE); 
+            DrawRectangleLines(100,100,600,400,BLACK);
+            DrawText("WYBIERZ EGZAMIN [1-3]",200,120,30,DARKBLUE);
+            DrawText("1. Latwy (50zl)",150,200,20,DARKGREEN);
+            DrawText(stats.level>=2?"2. Sredni (150zl)":"2. Sredni (Wymaga LVL 2)",150,250,20,stats.level>=2?DARKGREEN:GRAY);
+            DrawText(stats.level>=4?"3. Trudny (500zl)":"3. Trudny (Wymaga LVL 4)",150,300,20,stats.level>=4?DARKGREEN:GRAY);
+        }
+
+        // --- TELEFON ---
+        if (phone.state != PHONE_CLOSED) {
+            int px = 560, py = 180;
+            if (phone.state == MENU1) {
+                DrawRectangle(px,py,220,400,DARKGRAY); 
+                DrawRectangleLines(px,py,220,400,BLACK);
+                DrawRectangle(575,210,45,45,RAYWHITE); 
+                DrawText("BANK",580,225,10,BLACK); 
+                if(phone.selectedIcon==0) DrawRectangleLines(575,210,45,45,RED);
+                
+                DrawRectangle(630,210,45,45,BLACK); 
+                DrawText("KRYPTO",632,225,10,GREEN); 
+                if(phone.selectedIcon==1) DrawRectangleLines(630,210,45,45,RED);
+                
+                DrawRectangle(685,210,45,45,LIGHTGRAY); 
+                DrawText("WONGA",690,225,10,BLACK); 
+                if(phone.selectedIcon==2) DrawRectangleLines(685,210,45,45,RED);
+            } 
+            else if (phone.state == PIN){
+                DrawRectangle(560, 180, 220, 400, LIGHTGRAY);
+                DrawRectangleLines(560, 180, 220, 400, BLACK);
+                DrawText("WPROWADZ PIN:", 580, 200, 15, BLACK);
+                DrawText(phone.inputPin.c_str(), 600, 250, 20, BLACK);
+                if(phone.showError) DrawText("BLEDNY PIN!", 580, 300, 15, RED);
+            } 
+            else if (phone.state == ACCOUNT){
+                DrawRectangle(560, 180, 220, 400, RAYWHITE);
+                DrawRectangleLines(560, 180, 220, 400, BLACK);
+                DrawText("SALDO KONTA:", 580, 220, 10, DARKGRAY);
+                DrawText(TextFormat("%.2f zl", player.money), 590, 240, 20, GREEN);
+                DrawText(TextFormat("DLUG: %.2f", player.debt), 590, 280, 20, RED);
+                DrawText("[Q] Wroc", 630, 550, 10, LIGHTGRAY);
+            } 
+            else if (phone.state == APP_CRYPTO){
+                DrawRectangle(560, 180, 220, 400, BLACK);
+                DrawRectangleLines(560, 180, 220, 400, WHITE);
+                DrawText("SZYBKIE KRYPTO", 590, 200, 20, PURPLE);
+                DrawText("Twoje konto:", 580, 240, 15, WHITE);
+                DrawText(TextFormat("%.2f zl", player.money), 580, 260, 20, GREEN);
+                DrawText("STAWKA (Gora/Dol):", 580, 300, 10, LIGHTGRAY);
+                DrawRectangle(580, 315, 180, 40, DARKGRAY);
+                DrawText(TextFormat("%d zl", phone.currentBet), 630, 325, 20, WHITE);
+                DrawRectangle(580, 370, 180, 40, GOLD);
+                DrawText("INWESTUJ [ENTER]", 595, 382, 15, BLACK);
+                DrawText(phone.gambleInfo.c_str(), 580, 430, 15, phone.infoColor);
+                DrawText("[Q] Wroc", 640, 550, 10, GRAY);
+            }
+            else if (phone.state == APP_LOANS) {
+                 DrawRectangle(px,py,220,400,LIGHTGRAY); 
+                 DrawRectangleLines(px,py,220,400,BLACK);
+                 DrawText("CHWILOWKI",580,200,20,BLACK);
+                 DrawText(phone.loanInfo.c_str(),580,240,10,BLUE);
+                 
+                 float prowizja = 0;
+                 if(phone.loanOption==0) prowizja = 20;
+                 if(phone.loanOption==1) prowizja = 200;
+                 if(phone.loanOption==2) prowizja = 500;
+                 
+                 DrawText(TextFormat("Stan konta: %.2f", player.money), 580, 410, 10, DARKGREEN);
+                 
+                 Color c0=BLACK, c1=BLACK, c2=BLACK, c3=BLACK;
+                 if(phone.loanOption==0) c0=RED; if(phone.loanOption==1) c1=RED; if(phone.loanOption==2) c2=RED; if(phone.loanOption==3) c3=RED;
+                 
+                 DrawText("1. Mala (100)",570,270,10,c0);
+                 DrawText("2. Srednia (500)",570,290,10,c1);
+                 DrawText("3. Duza (1000)",570,310,10,c2);
+                 DrawText("4. SPLAC DLUG",570,350,10,c3);
+                 
+                 if (phone.loanOption >= 0 && phone.loanOption <= 2) {
+                     DrawText(TextFormat("Prowizja: %.0f zl", prowizja), 570, 380, 10, RED);
+                 }
+            }
+        }
 
         if (isPaused) {
             DrawRectangle(0, 0, screenWidth, screenHeight, Fade(BLACK, 0.5f));
